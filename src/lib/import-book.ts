@@ -61,7 +61,7 @@ async function parsePdf(file: File): Promise<Partial<BookRecord>> {
     /* metadata is optional */
   }
   const totalPages = doc.numPages;
-  await doc.destroy();
+  doc.cleanup();
   return { title, author, cover, totalPages };
 }
 
