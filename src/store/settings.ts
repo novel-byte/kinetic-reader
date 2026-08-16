@@ -42,7 +42,7 @@ export const useSettings = create<SettingsState>()(
   persist(
     (set) => ({
       theme: "oled",
-      fontFamily: BUILT_IN_FONTS[1].value,
+      fontFamily: '"Merriweather", Georgia, serif',
       fontSize: 108,
       lineHeight: 1.7,
       letterSpacing: 0,
