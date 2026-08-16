@@ -7,14 +7,14 @@ export interface BookRecord {
   title: string;
   author: string;
   format: BookFormat;
-  cover?: string;
+  cover?: string | undefined;
   addedAt: number;
-  lastReadAt?: number;
+  lastReadAt?: number | undefined;
   /** 0..1 */
   progress: number;
   /** EPUB CFI or PDF page number as string */
-  locator?: string;
-  totalPages?: number;
+  locator?: string | undefined;
+  totalPages?: number | undefined;
   file: Blob;
 }
 
@@ -22,7 +22,7 @@ export interface HighlightRecord {
   id: string;
   bookId: string;
   text: string;
-  locator?: string;
+  locator?: string | undefined;
   createdAt: number;
 }
 
