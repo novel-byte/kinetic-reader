@@ -1,41 +1,55 @@
 import { AnimatePresence, motion } from "framer-motion";
 import { Download, Share2, X } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
+import { dataUrlToFile, renderNodeToPng, toDataUrl } from "@/lib/share-image";
 
 interface QuoteShareCardProps {
   quote: string | null;
   title: string;
   author: string;
+  cover?: string | undefined;
   onClose: () => void;
 }
 
-async function renderNode(node: HTMLElement): Promise<string> {
-  const html2canvas = (await import("html2canvas")).default;
-  const canvas = await html2canvas(node, { scale: 2, backgroundColor: null, useCORS: true, logging: false });
-  return canvas.toDataURL("image/png");
-}
-
-async function dataUrlToFile(dataUrl: string, name: string) {
-  const blob = await (await fetch(dataUrl)).blob();
-  return new File([blob], name, { type: "image/png" });
-}
-
-export function QuoteShareCard({ quote, title, author, onClose }: QuoteShareCardProps) {
+export function QuoteShareCard({ quote, title, author, cover, onClose }: QuoteShareCardProps) {
   const cardRef = useRef<HTMLDivElement | null>(null);
   const [busy, setBusy] = useState(false);
+  const [inlineCover, setInlineCover] = useState<string | null>(null);
+
+  // Inline the cover before export so CORS can never taint the canvas.
+  useEffect(() => {
+    let cancelled = false;
+    setInlineCover(null);
+    if (quote && cover) {
+      void toDataUrl(cover).then((data) => {
+        if (!cancelled) setInlineCover(data);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [quote, cover]);
 
   const withRender = async (action: (dataUrl: string) => Promise<void>) => {
     if (!cardRef.current) return;
     setBusy(true);
     try {
-      const dataUrl = await renderNode(cardRef.current);
+      const dataUrl = await renderNodeToPng(cardRef.current);
       await action(dataUrl);
-    } catch {
+    } catch (error) {
+      console.error(error);
       toast.error("Couldn't render the share card");
     } finally {
       setBusy(false);
     }
+  };
+
+  const download = (dataUrl: string) => {
+    const link = document.createElement("a");
+    link.href = dataUrl;
+    link.download = "quote.png";
+    link.click();
   };
 
   const share = () =>
@@ -44,20 +58,14 @@ export function QuoteShareCard({ quote, title, author, onClose }: QuoteShareCard
       if (navigator.canShare?.({ files: [file] })) {
         await navigator.share({ files: [file], title, text: quote ?? "" });
       } else {
-        const link = document.createElement("a");
-        link.href = dataUrl;
-        link.download = "quote.png";
-        link.click();
+        download(dataUrl);
         toast.success("Saved to your downloads");
       }
     });
 
-  const download = () =>
+  const exportPng = () =>
     withRender(async (dataUrl) => {
-      const link = document.createElement("a");
-      link.href = dataUrl;
-      link.download = "quote.png";
-      link.click();
+      download(dataUrl);
       toast.success("Quote card exported");
     });
 
@@ -65,10 +73,10 @@ export function QuoteShareCard({ quote, title, author, onClose }: QuoteShareCard
     <AnimatePresence>
       {quote && (
         <motion.div
-          initial={{ opacity: 0, backdropFilter: "blur(0px)" }}
-          animate={{ opacity: 1, backdropFilter: "blur(18px)" }}
-          exit={{ opacity: 0, backdropFilter: "blur(0px)" }}
-          className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-background/80 p-5"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          className="fixed inset-0 z-[60] flex flex-col items-center justify-center gap-5 bg-background/85 p-5 backdrop-blur-xl"
         >
           <motion.div
             initial={{ scale: 0.92, y: 24 }}
@@ -77,7 +85,7 @@ export function QuoteShareCard({ quote, title, author, onClose }: QuoteShareCard
             transition={{ type: "spring", stiffness: 260, damping: 26 }}
             className="w-full max-w-[340px]"
           >
-            {/* Rendered artifact — visible preview and html2canvas source. */}
+            {/* Rendered artifact — visible preview and html-to-image source. */}
             <div
               ref={cardRef}
               className="relative overflow-hidden rounded-[26px] p-8"
@@ -96,8 +104,15 @@ export function QuoteShareCard({ quote, title, author, onClose }: QuoteShareCard
                 <span className="text-primary">”</span>
               </p>
               <div className="mt-8 h-px w-16 bg-primary/60" />
-              <p className="mt-4 font-serif text-base tracking-tight text-foreground">{title}</p>
-              <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{author}</p>
+              <div className="mt-4 flex items-center gap-3">
+                {inlineCover && (
+                  <img src={inlineCover} alt="" className="h-14 w-10 rounded-md object-cover" />
+                )}
+                <div className="min-w-0">
+                  <p className="font-serif text-base tracking-tight text-foreground">{title}</p>
+                  <p className="text-xs uppercase tracking-[0.2em] text-muted-foreground">{author}</p>
+                </div>
+              </div>
             </div>
           </motion.div>
 
@@ -110,7 +125,7 @@ export function QuoteShareCard({ quote, title, author, onClose }: QuoteShareCard
               <Share2 className="size-4" /> Share
             </button>
             <button
-              onClick={download}
+              onClick={exportPng}
               disabled={busy}
               className="flex items-center gap-2 rounded-full border border-border px-5 py-2.5 text-sm transition-transform active:scale-95 disabled:opacity-60"
             >

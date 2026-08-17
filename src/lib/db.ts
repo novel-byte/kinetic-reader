@@ -15,7 +15,11 @@ export interface BookRecord {
   /** EPUB CFI or PDF page number as string */
   locator?: string | undefined;
   totalPages?: number | undefined;
-  file: Blob;
+  /** Where the metadata came from (Discover); no binary yet. */
+  sourceUrl?: string | undefined;
+  /** Absent for catalog entries whose file hasn't been downloaded. */
+  file?: Blob | undefined;
+
 }
 
 export interface HighlightRecord {

@@ -1,9 +1,11 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
 import { motion } from "framer-motion";
-import { ChevronLeft, Search, Star } from "lucide-react";
-import { useState } from "react";
-import { searchCatalog } from "@/lib/catalog";
+import { ChevronLeft, Search } from "lucide-react";
+import { useEffect, useState } from "react";
+import { toast } from "sonner";
+import { CURATED_CLASSICS, searchCatalog, type CatalogItem } from "@/lib/catalog";
+import { BookCard, GRID_CLASS, gridVariants } from "@/components/library/BookCard";
+import { useLibrary } from "@/store/library";
 
 export const Route = createFileRoute("/discover")({
   head: () => ({
@@ -11,49 +13,96 @@ export const Route = createFileRoute("/discover")({
       { title: "Discover Books — Marginalia" },
       {
         name: "description",
-        content: "Search Google Books and Open Library for covers, summaries and ratings to plan your next read.",
+        content: "Search Open Library for covers and metadata and save your next read to your shelf.",
       },
       { property: "og:title", content: "Discover Books — Marginalia" },
-      { property: "og:description", content: "Search millions of titles across Google Books and Open Library." },
+      { property: "og:description", content: "Search millions of titles and save them to your library." },
     ],
   }),
   component: DiscoverPage,
 });
 
+function SkeletonGrid() {
+  return (
+    <div className={`${GRID_CLASS} mt-4`}>
+      {Array.from({ length: 12 }).map((_, i) => (
+        <div key={i}>
+          <div className="aspect-[2/3] w-full animate-pulse rounded-lg bg-foreground/10" />
+          <div className="mt-1.5 h-3 w-4/5 animate-pulse rounded bg-foreground/10" />
+          <div className="mt-1 h-2 w-2/3 animate-pulse rounded bg-foreground/8" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function DiscoverPage() {
   const [input, setInput] = useState("");
-  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<CatalogItem[]>(CURATED_CLASSICS);
+  const [loading, setLoading] = useState(false);
+  const addFromCatalog = useLibrary((s) => s.addFromCatalog);
+  const refresh = useLibrary((s) => s.refresh);
 
-  const { data, isFetching } = useQuery({
-    queryKey: ["catalog", query],
-    queryFn: () => searchCatalog(query),
-    enabled: query.length > 1,
-    staleTime: 5 * 60 * 1000,
-  });
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  // 300ms debounce + AbortController so stale requests never win.
+  useEffect(() => {
+    const query = input.trim();
+    if (query.length < 2) {
+      setResults(CURATED_CLASSICS);
+      setLoading(false);
+      return;
+    }
+    const controller = new AbortController();
+    setLoading(true);
+    const timer = window.setTimeout(() => {
+      searchCatalog(query, controller.signal)
+        .then((items) => {
+          setResults(items);
+          setLoading(false);
+        })
+        .catch(() => {
+          /* aborted or offline */
+        });
+    }, 300);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [input]);
+
+  const save = async (item: CatalogItem) => {
+    const outcome = await addFromCatalog({
+      id: item.id,
+      title: item.title,
+      author: item.author,
+      cover: item.cover,
+      sourceUrl: item.sourceUrl,
+    });
+    toast[outcome === "added" ? "success" : "message"](
+      outcome === "added" ? `Saved “${item.title}” to your library` : "Already in your library",
+    );
+  };
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-2xl px-5 pb-20 pt-10">
-      <header className="mb-6 flex items-center gap-3">
+    <main className="mx-auto min-h-screen w-full max-w-2xl px-4 pb-20 pt-5">
+      <header className="flex items-center gap-3">
         <Link
           to="/"
-          className="rounded-full border border-border p-2.5 transition-transform active:scale-95"
+          className="rounded-full border border-border p-2 transition-transform active:scale-95"
           aria-label="Back to library"
         >
           <ChevronLeft className="size-4" />
         </Link>
         <div>
-          <p className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground">Discover</p>
-          <h1 className="font-serif text-3xl tracking-tight">Find your next book</h1>
+          <p className="text-[10px] uppercase tracking-[0.24em] text-muted-foreground">Discover</p>
+          <h1 className="font-serif text-2xl tracking-tight">Find your next book</h1>
         </div>
       </header>
 
-      <form
-        onSubmit={(e) => {
-          e.preventDefault();
-          setQuery(input.trim());
-        }}
-        className="glass mb-8 flex items-center gap-2 rounded-full px-4 py-2.5"
-      >
+      <div className="glass mt-4 flex items-center gap-2 rounded-full px-4 py-2.5">
         <Search className="size-4 text-muted-foreground" />
         <input
           value={input}
@@ -61,50 +110,24 @@ function DiscoverPage() {
           placeholder="Title, author, subject…"
           className="w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground"
         />
-        <button
-          type="submit"
-          className="rounded-full bg-primary px-4 py-1.5 text-xs font-medium text-primary-foreground transition-transform active:scale-95"
-        >
-          Search
-        </button>
-      </form>
+      </div>
 
-      {isFetching && <p className="text-sm text-muted-foreground">Searching Google Books and Open Library…</p>}
+      <p className="mt-4 text-[11px] uppercase tracking-[0.2em] text-muted-foreground">
+        {input.trim().length < 2 ? "Public-domain classics" : loading ? "Searching…" : `${results.length} results`}
+      </p>
 
-      <motion.ul
-        initial="hidden"
-        animate="show"
-        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
-        className="space-y-3"
-      >
-        {(data ?? []).map((item) => (
-          <motion.li
-            key={item.id}
-            variants={{ hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0 } }}
-            className="glass flex gap-4 rounded-2xl p-4"
-          >
-            <div className="h-28 w-20 shrink-0 overflow-hidden rounded-lg bg-surface-2">
-              {item.cover && (
-                <img src={item.cover} alt={`Cover of ${item.title}`} loading="lazy" className="h-full w-full object-cover" />
-              )}
-            </div>
-            <div className="min-w-0">
-              <h2 className="line-clamp-2 font-serif text-lg tracking-tight">{item.title}</h2>
-              <p className="truncate text-xs uppercase tracking-[0.16em] text-muted-foreground">{item.author}</p>
-              {item.rating ? (
-                <p className="mt-1 flex items-center gap-1 text-xs text-primary">
-                  <Star className="size-3 fill-current" /> {item.rating.toFixed(1)}
-                </p>
-              ) : null}
-              <p className="mt-2 line-clamp-3 text-sm text-muted-foreground">{item.summary}</p>
-              <p className="mt-2 text-[10px] uppercase tracking-[0.24em] text-muted-foreground/70">{item.source}</p>
-            </div>
-          </motion.li>
-        ))}
-      </motion.ul>
+      {loading ? (
+        <SkeletonGrid />
+      ) : (
+        <motion.div initial="hidden" animate="show" variants={gridVariants} className={`${GRID_CLASS} mt-3`}>
+          {results.map((item) => (
+            <BookCard key={item.id} book={item} onOpen={() => void save(item)} />
+          ))}
+        </motion.div>
+      )}
 
-      {query.length > 1 && !isFetching && (data?.length ?? 0) === 0 && (
-        <p className="text-sm text-muted-foreground">Nothing found. Try another phrase.</p>
+      {!loading && results.length === 0 && (
+        <p className="mt-8 text-center text-sm text-muted-foreground">Nothing found. Try another phrase.</p>
       )}
     </main>
   );
