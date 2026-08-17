@@ -95,10 +95,21 @@ function ReaderExperience() {
 
   const canvas = useMemo(() => {
     if (!book) return null;
+    const file = book.file;
+    if (!file) {
+      return (
+        <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center">
+          <p className="font-serif text-xl tracking-tight">Not downloaded yet</p>
+          <p className="max-w-[32ch] text-sm text-muted-foreground">
+            This title was saved from Discover. Import the EPUB or PDF file to start reading it offline.
+          </p>
+        </div>
+      );
+    }
     if (book.format === "pdf") {
       return (
         <PdfCanvas
-          file={book.file}
+          file={file}
           initialLocator={book.locator}
           onReady={onReady}
           onRelocated={onRelocated}
@@ -108,7 +119,7 @@ function ReaderExperience() {
     }
     return (
       <EpubCanvas
-        file={book.file}
+        file={file}
         initialLocator={book.locator}
         onReady={onReady}
         onToc={setToc}
@@ -118,6 +129,7 @@ function ReaderExperience() {
       />
     );
   }, [book, onReady, onRelocated, onCenterTap, onSelection]);
+
 
   if (!id) {
     return (
