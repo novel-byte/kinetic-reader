@@ -8,6 +8,15 @@ import {
   type BookRecord,
   type DayRecord,
 } from "@/lib/db";
+import { useAnnotations } from "@/store/annotations";
+
+export interface CatalogSeed {
+  id: string;
+  title: string;
+  author: string;
+  cover?: string | undefined;
+  sourceUrl: string;
+}
 
 interface LibraryState {
   books: BookRecord[];
@@ -16,9 +25,15 @@ interface LibraryState {
   importing: boolean;
   refresh: () => Promise<void>;
   importFiles: (files: FileList | File[]) => Promise<void>;
+  addFromCatalog: (seed: CatalogSeed) => Promise<"added" | "duplicate">;
   remove: (id: string) => Promise<void>;
   saveProgress: (id: string, patch: Partial<BookRecord>) => Promise<void>;
 }
+
+const sameBook = (a: { id: string; title: string; author: string }, b: BookRecord) =>
+  a.id === b.id ||
+  (a.title.trim().toLowerCase() === b.title.trim().toLowerCase() &&
+    a.author.trim().toLowerCase() === b.author.trim().toLowerCase());
 
 export const useLibrary = create<LibraryState>((set, get) => ({
   books: [],
@@ -35,6 +50,7 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       const { buildBookRecord } = await import("@/lib/import-book");
       for (const file of Array.from(files)) {
         const record = await buildBookRecord(file);
+        if (get().books.some((existing) => sameBook(record, existing))) continue;
         await putBook(record);
       }
       await get().refresh();
@@ -42,8 +58,24 @@ export const useLibrary = create<LibraryState>((set, get) => ({
       set({ importing: false });
     }
   },
+  addFromCatalog: async (seed) => {
+    if (get().books.some((existing) => sameBook(seed, existing))) return "duplicate";
+    await putBook({
+      id: seed.id,
+      title: seed.title,
+      author: seed.author,
+      format: "epub",
+      cover: seed.cover,
+      sourceUrl: seed.sourceUrl,
+      addedAt: Date.now(),
+      progress: 0,
+    });
+    await get().refresh();
+    return "added";
+  },
   remove: async (id) => {
     await deleteBook(id);
+    useAnnotations.getState().purgeBook(id);
     await get().refresh();
   },
   saveProgress: async (id, patch) => {
