@@ -1,12 +1,14 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { motion } from "framer-motion";
-import { BookOpen, Compass, Flame, Plus, Settings2 } from "lucide-react";
+import { BookOpen, Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeStreaks, formatMinutes } from "@/lib/dates";
 import { useLibrary } from "@/store/library";
 import { useAnnotations } from "@/store/annotations";
 import { BookCard, GRID_CLASS, gridVariants } from "@/components/library/BookCard";
 import { ConfirmRemoveSheet } from "@/components/library/ConfirmRemoveSheet";
+import { BottomNav } from "@/components/shell/BottomNav";
+import { KineticHeading } from "@/components/ui/KineticHeading";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -57,6 +59,7 @@ function LibraryPage() {
   const open = (id: string) => navigate({ to: "/reader", search: { id } });
 
   return (
+    <>
     <main className="mx-auto min-h-dvh w-full max-w-2xl bg-background px-4 pb-24 pt-5">
       <header>
         <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Marginalia</p>
@@ -186,5 +189,7 @@ function LibraryPage() {
         }}
       />
     </main>
+    <BottomNav />
+    </>
   );
 }
