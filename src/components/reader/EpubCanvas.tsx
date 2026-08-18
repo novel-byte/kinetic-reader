@@ -1,28 +1,38 @@
 import { useEffect, useRef } from "react";
 import type { NavItem } from "epubjs";
-import { useSettings } from "@/store/settings";
+import { useSettings, READER_PALETTE } from "@/store/settings";
+import { useAnnotations, colorCss } from "@/store/annotations";
+
+export interface SelectionInfo {
+  cfiRange: string;
+  text: string;
+  rect: { top: number; bottom: number; left: number; right: number };
+  clear: () => void;
+}
 
 export interface ReaderApi {
   next: () => void;
   prev: () => void;
   goTo: (target: string) => void;
+  /** EPUB only: paint or erase an annotation for a CFI range. */
+  highlight?: (cfiRange: string, css: string) => void;
+  unhighlight?: (cfiRange: string) => void;
+  currentCfi?: () => string;
 }
 
 interface EpubCanvasProps {
+  bookId: string;
   file: Blob;
   initialLocator?: string | undefined;
   onReady: (api: ReaderApi) => void;
   onToc: (items: NavItem[]) => void;
-  onRelocated: (info: { locator: string; progress: number; label: string }) => void;
+  onRelocated: (info: { locator: string; progress: number; label: string; href: string; forward: boolean }) => void;
   onCenterTap: () => void;
-  onSelection: (text: string, locator: string) => void;
-}
-
-function readVar(name: string) {
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  onSelection: (info: SelectionInfo | null) => void;
 }
 
 export default function EpubCanvas({
+  bookId,
   file,
   initialLocator,
   onReady,
@@ -40,6 +50,7 @@ export default function EpubCanvas({
     let disposed = false;
     let rendition: import("epubjs").Rendition | null = null;
     let book: import("epubjs").Book | null = null;
+    let lastProgress = 0;
 
     (async () => {
       const ePub = (await import("epubjs")).default;
@@ -65,6 +76,22 @@ export default function EpubCanvas({
       await rendition.display(initialLocator || undefined);
       void book.locations.generate(1600);
 
+      const paintSaved = () => {
+        const saved = useAnnotations.getState().highlights.filter((h) => h.bookId === bookId);
+        saved.forEach((h) => {
+          try {
+            rendition?.annotations.highlight(h.cfi, {}, () => {}, "highlight", {
+              fill: colorCss(h.color),
+              "fill-opacity": "1",
+            });
+          } catch {
+            /* range not in this view yet */
+          }
+        });
+      };
+      paintSaved();
+      rendition.on("rendered", paintSaved);
+
       rendition.on("relocated", (location: import("epubjs").Location) => {
         const cfi = location?.start?.cfi;
         if (!cfi || !book) return;
@@ -72,10 +99,14 @@ export default function EpubCanvas({
           book.locations && typeof book.locations.percentageFromCfi === "function"
             ? book.locations.percentageFromCfi(cfi) || 0
             : 0;
+        const forward = percentage >= lastProgress;
+        lastProgress = percentage;
         onRelocated({
           locator: cfi,
           progress: Math.min(1, Math.max(0, percentage)),
           label: String(location?.start?.href ?? ""),
+          href: String(location?.start?.href ?? ""),
+          forward,
         });
 
         // Dynamic content cache: warm the adjacent spine items.
@@ -87,14 +118,32 @@ export default function EpubCanvas({
         });
       });
 
-      rendition.on("selected", (cfiRange: string, contents: { window: Window }) => {
-        const text = contents.window.getSelection()?.toString().trim();
-        if (text) onSelection(text, cfiRange);
+      rendition.on("selected", (cfiRange: string, contents: { window: Window; document: Document }) => {
+        const selection = contents.window.getSelection();
+        const text = (book?.getRange ? String(book.getRange(cfiRange)) : selection?.toString()) || selection?.toString();
+        const clean = (text ?? "").trim();
+        if (!clean || !selection || selection.rangeCount === 0) return;
+        const rect = selection.getRangeAt(0).getBoundingClientRect();
+        const frame = contents.document.defaultView?.frameElement?.getBoundingClientRect();
+        const offsetX = frame?.left ?? 0;
+        const offsetY = frame?.top ?? 0;
+        onSelection({
+          cfiRange,
+          text: clean,
+          rect: {
+            top: rect.top + offsetY,
+            bottom: rect.bottom + offsetY,
+            left: rect.left + offsetX,
+            right: rect.right + offsetX,
+          },
+          clear: () => selection.removeAllRanges(),
+        });
       });
 
       rendition.on("click", (event: MouseEvent) => {
         const width = holderRef.current?.clientWidth ?? window.innerWidth;
         const x = event.clientX;
+        onSelection(null);
         if (x < width * 0.3) rendition?.prev();
         else if (x > width * 0.7) rendition?.next();
         else onCenterTap();
@@ -104,6 +153,24 @@ export default function EpubCanvas({
         next: () => rendition?.next(),
         prev: () => rendition?.prev(),
         goTo: (target: string) => void rendition?.display(target),
+        highlight: (cfiRange: string, css: string) => {
+          try {
+            rendition?.annotations.remove(cfiRange, "highlight");
+          } catch {
+            /* none yet */
+          }
+          rendition?.annotations.highlight(cfiRange, {}, () => {}, "highlight", {
+            fill: css,
+            "fill-opacity": "1",
+          });
+        },
+        unhighlight: (cfiRange: string) => {
+          try {
+            rendition?.annotations.remove(cfiRange, "highlight");
+          } catch {
+            /* nothing painted */
+          }
+        },
       });
     })();
 
@@ -125,28 +192,24 @@ export default function EpubCanvas({
   useEffect(() => {
     const rendition = renditionRef.current;
     if (!rendition) return;
-    const foreground = readVar("--foreground");
-    const background = readVar("--background");
-    const accent = readVar("--primary");
+    const palette = READER_PALETTE[settings.theme];
     rendition.themes.register("kinetic", {
       body: {
-        color: foreground,
-        background: background,
-        "font-family": `${settings.fontFamily} !important`,
+        color: palette.color,
+        background: palette.background,
+        "font-family": `${settings.fontFamily || "inherit"} !important`,
         "line-height": `${settings.lineHeight} !important`,
         "letter-spacing": `${settings.letterSpacing}px !important`,
         padding: `0 ${settings.margin}px !important`,
         "text-align": "justify",
       },
       "p, li, div, span": {
-        color: `${foreground} !important`,
-        "font-family": `${settings.fontFamily} !important`,
+        color: `${palette.color} !important`,
         "line-height": `${settings.lineHeight} !important`,
         "letter-spacing": `${settings.letterSpacing}px !important`,
       },
-      "h1, h2, h3, h4": { color: `${foreground} !important` },
-      a: { color: `${accent} !important` },
-      "::selection": { background: `${accent}` },
+      "h1, h2, h3, h4": { color: `${palette.color} !important` },
+      a: { color: `${palette.link} !important` },
     });
     rendition.themes.select("kinetic");
     rendition.themes.fontSize(`${settings.fontSize}%`);
