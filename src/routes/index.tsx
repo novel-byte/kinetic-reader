@@ -33,7 +33,6 @@ function LibraryPage() {
   const books = useLibrary((s) => s.books);
   const days = useLibrary((s) => s.days);
   const loaded = useLibrary((s) => s.loaded);
-  const importing = useLibrary((s) => s.importing);
   const refresh = useLibrary((s) => s.refresh);
   const importFiles = useLibrary((s) => s.importFiles);
   const remove = useLibrary((s) => s.remove);
