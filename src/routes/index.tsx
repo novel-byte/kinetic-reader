@@ -197,14 +197,6 @@ function LibraryPage() {
         }}
       />
 
-      <button
-        onClick={() => inputRef.current?.click()}
-        disabled={importing}
-        className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-2xl transition-transform active:scale-95 disabled:opacity-70"
-      >
-        <Plus className="size-4" />
-        {importing ? "Importing…" : "Import book"}
-      </button>
 
       <ConfirmRemoveSheet
         title={pendingRemove?.title ?? null}
