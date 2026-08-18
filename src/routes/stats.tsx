@@ -1,11 +1,13 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { motion } from "framer-motion";
-import { ChevronLeft } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ClientOnly } from "@tanstack/react-router";
 import { EmberHeatmap } from "@/components/stats/EmberHeatmap";
+import { Odometer } from "@/components/stats/Odometer";
 import { WrappedCarousel } from "@/components/stats/WrappedCarousel";
-import { computeStreaks, currentWrappedPeriod, formatMinutes } from "@/lib/dates";
+import { BottomNav } from "@/components/shell/BottomNav";
+import { KineticHeading } from "@/components/ui/KineticHeading";
+import { computeStreaks, currentWrappedPeriod, formatMinutes, localDayKey } from "@/lib/dates";
 import { useLibrary } from "@/store/library";
 
 export const Route = createFileRoute("/stats")({
@@ -25,17 +27,17 @@ export const Route = createFileRoute("/stats")({
 
 function StatsPage() {
   return (
-    <ClientOnly fallback={<div className="min-h-screen bg-background" />}>
+    <ClientOnly fallback={<div className="min-h-dvh bg-background" />}>
       <StatsContent />
     </ClientOnly>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({ label, value }: { label: string; value: React.ReactNode }) {
   return (
-    <div className="glass rounded-2xl px-4 py-3">
-      <p className="text-[10px] uppercase tracking-[0.26em] text-muted-foreground">{label}</p>
-      <p className="mt-1 font-serif text-2xl tracking-tight">{value}</p>
+    <div className="glass rounded-xl px-2.5 py-2">
+      <p className="text-[9px] uppercase tracking-[0.22em] text-muted-foreground">{label}</p>
+      <p className="mt-0.5 font-serif text-lg tracking-tight">{value}</p>
     </div>
   );
 }
@@ -46,54 +48,57 @@ function StatsContent() {
     void refresh();
   }, [refresh]);
 
-  const streaks = computeStreaks(days);
+  const streaks = useMemo(() => computeStreaks(days), [days]);
   const period = currentWrappedPeriod();
 
+  // Ember ignition: bump a key whenever today's committed minutes increase.
+  const todayMinutes = days.find((d) => d.date === localDayKey())?.minutes ?? 0;
+  const previous = useRef(todayMinutes);
+  const [igniteKey, setIgniteKey] = useState(0);
+  useEffect(() => {
+    if (todayMinutes > previous.current) setIgniteKey((k) => k + 1);
+    previous.current = todayMinutes;
+  }, [todayMinutes]);
+
   return (
-    <main className="mx-auto min-h-screen w-full max-w-2xl px-5 pb-16 pt-10">
-      <header className="mb-8 flex items-center gap-3">
-        <Link
-          to="/"
-          className="rounded-full border border-border p-2.5 transition-transform active:scale-95"
-          aria-label="Back to library"
+    <>
+      <main className="mx-auto flex h-dvh w-full max-w-2xl flex-col overflow-hidden bg-background px-4 pb-20 pt-5">
+        <header>
+          <p className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Analytics</p>
+          <KineticHeading className="font-serif text-2xl tracking-tight">Reading life</KineticHeading>
+        </header>
+
+        <motion.div
+          initial="hidden"
+          animate="show"
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.05 } } }}
+          className="mt-3 grid grid-cols-4 gap-2"
         >
-          <ChevronLeft className="size-4" />
-        </Link>
-        <div>
-          <p className="text-[10px] uppercase tracking-[0.4em] text-muted-foreground">Analytics</p>
-          <h1 className="font-serif text-3xl tracking-tight">Reading life</h1>
-        </div>
-      </header>
+          {[
+            { label: "Streak", value: <Odometer value={streaks.current} /> },
+            { label: "Longest", value: <Odometer value={streaks.longest} /> },
+            { label: "Read", value: formatMinutes(streaks.totalMinutes) },
+            { label: "Days", value: <Odometer value={streaks.activeDays} /> },
+          ].map((stat) => (
+            <motion.div key={stat.label} variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>
+              <Stat label={stat.label} value={stat.value} />
+            </motion.div>
+          ))}
+        </motion.div>
 
-      <motion.div
-        initial="hidden"
-        animate="show"
-        variants={{ hidden: {}, show: { transition: { staggerChildren: 0.07 } } }}
-        className="grid grid-cols-2 gap-3"
-      >
-        {[
-          { label: "Current streak", value: `${streaks.current}d` },
-          { label: "Longest streak", value: `${streaks.longest}d` },
-          { label: "Time read", value: formatMinutes(streaks.totalMinutes) },
-          { label: "Days read", value: `${streaks.activeDays}` },
-        ].map((stat) => (
-          <motion.div key={stat.label} variants={{ hidden: { opacity: 0, y: 18 }, show: { opacity: 1, y: 0 } }}>
-            <Stat label={stat.label} value={stat.value} />
-          </motion.div>
-        ))}
-      </motion.div>
+        <section className="glass mt-3 rounded-2xl p-3">
+          <h2 className="font-serif text-base tracking-tight">Embers</h2>
+          <p className="mb-2 text-[11px] text-muted-foreground">Trailing 365 days of reading intensity.</p>
+          <EmberHeatmap days={days} igniteKey={igniteKey} />
+        </section>
 
-      <section className="glass mt-8 rounded-3xl p-5">
-        <h2 className="font-serif text-xl tracking-tight">Embers</h2>
-        <p className="mb-4 text-xs text-muted-foreground">Trailing 365 days of reading intensity.</p>
-        <EmberHeatmap days={days} />
-      </section>
-
-      <section className="mt-8">
-        <h2 className="font-serif text-xl tracking-tight">Reading Wrapped</h2>
-        <p className="mb-4 text-xs text-muted-foreground">{period.label} · swipe through your 120-day story.</p>
-        <WrappedCarousel days={days} books={books} />
-      </section>
-    </main>
+        <section className="mt-3 flex min-h-0 flex-1 flex-col">
+          <h2 className="font-serif text-base tracking-tight">Reading Wrapped</h2>
+          <p className="mb-2 text-[11px] text-muted-foreground">{period.label} · swipe your 120-day story.</p>
+          <WrappedCarousel days={days} books={books} />
+        </section>
+      </main>
+      <BottomNav />
+    </>
   );
 }

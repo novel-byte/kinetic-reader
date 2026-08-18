@@ -1,12 +1,14 @@
-import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { motion } from "framer-motion";
-import { BookOpen, Compass, Flame, Plus, Settings2 } from "lucide-react";
+import { BookOpen, Plus } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { computeStreaks, formatMinutes } from "@/lib/dates";
 import { useLibrary } from "@/store/library";
 import { useAnnotations } from "@/store/annotations";
 import { BookCard, GRID_CLASS, gridVariants } from "@/components/library/BookCard";
 import { ConfirmRemoveSheet } from "@/components/library/ConfirmRemoveSheet";
+import { BottomNav } from "@/components/shell/BottomNav";
+import { KineticHeading } from "@/components/ui/KineticHeading";
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -31,7 +33,6 @@ function LibraryPage() {
   const books = useLibrary((s) => s.books);
   const days = useLibrary((s) => s.days);
   const loaded = useLibrary((s) => s.loaded);
-  const importing = useLibrary((s) => s.importing);
   const refresh = useLibrary((s) => s.refresh);
   const importFiles = useLibrary((s) => s.importFiles);
   const remove = useLibrary((s) => s.remove);
@@ -57,35 +58,15 @@ function LibraryPage() {
   const open = (id: string) => navigate({ to: "/reader", search: { id } });
 
   return (
-    <main className="mx-auto min-h-screen w-full max-w-2xl px-4 pb-24 pt-5">
-      <header className="flex items-center justify-between gap-3">
+    <>
+    <main className="mx-auto min-h-dvh w-full max-w-2xl bg-background px-4 pb-24 pt-5">
+      <header>
         <p className="text-[11px] uppercase tracking-[0.2em] text-muted-foreground">Marginalia</p>
-        <div className="flex items-center gap-2">
-          <Link
-            to="/discover"
-            className="rounded-full border border-border p-2 transition-transform active:scale-95"
-            aria-label="Discover books"
-          >
-            <Compass className="size-4" />
-          </Link>
-          <Link
-            to="/stats"
-            className="flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs transition-transform active:scale-95"
-          >
-            <Flame className="size-3.5 text-primary" />
-            {streaks.current}
-          </Link>
-          <Link
-            to="/settings"
-            className="rounded-full border border-border p-2 transition-transform active:scale-95"
-            aria-label="Reading settings"
-          >
-            <Settings2 className="size-4" />
-          </Link>
-        </div>
       </header>
 
-      <h1 className="mt-2 font-serif text-2xl tracking-tight text-foreground">Your library</h1>
+      <KineticHeading className="mt-2 font-serif text-2xl tracking-tight text-foreground" settle>
+        Your library
+      </KineticHeading>
 
       <div className="no-scrollbar mt-3 flex items-center gap-2 overflow-x-auto text-[11px]">
         <span className="whitespace-nowrap rounded-full border border-border px-3 py-1 text-muted-foreground">
@@ -197,14 +178,6 @@ function LibraryPage() {
         }}
       />
 
-      <button
-        onClick={() => inputRef.current?.click()}
-        disabled={importing}
-        className="fixed bottom-6 left-1/2 z-30 flex -translate-x-1/2 items-center gap-2 rounded-full bg-primary px-5 py-3 text-sm font-medium text-primary-foreground shadow-2xl transition-transform active:scale-95 disabled:opacity-70"
-      >
-        <Plus className="size-4" />
-        {importing ? "Importing…" : "Import book"}
-      </button>
 
       <ConfirmRemoveSheet
         title={pendingRemove?.title ?? null}
@@ -215,5 +188,7 @@ function LibraryPage() {
         }}
       />
     </main>
+    <BottomNav />
+    </>
   );
 }

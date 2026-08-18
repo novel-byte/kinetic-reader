@@ -74,9 +74,16 @@ export function BookCard({ book, favorite, onOpen, onToggleFavorite, onRequestRe
               className="h-full w-full object-cover"
             />
           ) : (
-            <span className="flex h-full w-full items-center justify-center p-2 text-center font-serif text-[11px] leading-tight tracking-tight text-foreground/70">
-              {book.title}
-            </span>
+            <div className="relative flex h-full w-full flex-col justify-between overflow-hidden bg-[linear-gradient(160deg,color-mix(in_oklab,var(--primary)_16%,var(--surface-2)),var(--surface-2))] p-2">
+              <div className="grain pointer-events-none absolute inset-0 opacity-25 mix-blend-overlay" />
+              <span className="text-[7px] uppercase tracking-[0.28em] text-foreground/45">Marginalia</span>
+              <span className="line-clamp-4 font-serif text-[11px] leading-[1.15] tracking-tight text-foreground/85">
+                {book.title}
+              </span>
+              <span className="line-clamp-1 text-[8px] uppercase tracking-[0.16em] text-foreground/50">
+                {book.author}
+              </span>
+            </div>
           )}
           {badge && (
             <span className="absolute bottom-1 left-1 rounded bg-background/70 px-1.5 py-0.5 text-[9px] uppercase tracking-[0.18em] text-foreground/80">
