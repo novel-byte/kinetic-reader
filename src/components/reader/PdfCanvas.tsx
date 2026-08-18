@@ -1,21 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReaderApi } from "./EpubCanvas";
+import type { TocNode } from "./TocDrawer";
 
 interface PdfCanvasProps {
   file: Blob;
   initialLocator?: string | undefined;
   onReady: (api: ReaderApi) => void;
-  onRelocated: (info: { locator: string; progress: number; label: string }) => void;
+  onToc: (items: TocNode[]) => void;
+  onRelocated: (info: { locator: string; progress: number; label: string; href: string; forward: boolean }) => void;
   onCenterTap: () => void;
 }
 
-const MIN_ZOOM = 0.6;
-const MAX_ZOOM = 6;
+const MIN_ZOOM = 1;
+const MAX_ZOOM = 4;
 
 export default function PdfCanvas({
   file,
   initialLocator,
   onReady,
+  onToc,
   onRelocated,
   onCenterTap,
 }: PdfCanvasProps) {
@@ -26,10 +29,11 @@ export default function PdfCanvas({
   const [page, setPage] = useState(() => Number(initialLocator) || 1);
   const [total, setTotal] = useState(0);
   const [zoom, setZoom] = useState(1);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const stateRef = useRef({ zoom, offset });
-  stateRef.current = { zoom, offset };
+  const zoomRef = useRef(1);
+  zoomRef.current = zoom;
+  const lastPage = useRef(page);
 
+  // Load the document and its outline.
   useEffect(() => {
     let disposed = false;
     (async () => {
@@ -40,26 +44,60 @@ export default function PdfCanvas({
       if (disposed) return;
       docRef.current = doc;
       setTotal(doc.numPages);
+
+      // Outline -> designed TOC rows; dest resolves to a 1-based page number.
+      try {
+        const outline = await doc.getOutline();
+        const walk = async (
+          nodes: { title: string; dest: string | unknown[] | null; items?: unknown[] }[],
+        ): Promise<TocNode[]> =>
+          Promise.all(
+            nodes.map(async (node) => {
+              let href = "";
+              try {
+                const dest = typeof node.dest === "string" ? await doc.getDestination(node.dest) : node.dest;
+                if (Array.isArray(dest) && dest[0]) {
+                  const index = await doc.getPageIndex(dest[0] as never);
+                  href = String(index + 1);
+                }
+              } catch {
+                /* unresolvable destination */
+              }
+              return {
+                label: node.title,
+                href,
+                subitems: node.items?.length
+                  ? await walk(node.items as { title: string; dest: string | unknown[] | null; items?: unknown[] }[])
+                  : [],
+              };
+            }),
+          );
+        onToc(outline?.length ? await walk(outline as never) : []);
+      } catch {
+        onToc([]);
+      }
     })();
     return () => {
       disposed = true;
       docRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [file]);
 
-  const renderPage = useCallback(async (pageNumber: number) => {
+  /** Fit-width base scale, multiplied by zoom and devicePixelRatio for crispness. */
+  const renderPage = useCallback(async (pageNumber: number, scale: number) => {
     const doc = docRef.current;
     const canvas = canvasRef.current;
     const container = containerRef.current;
     if (!doc || !canvas || !container) return;
     const pdfPage = await doc.getPage(pageNumber);
     const base = pdfPage.getViewport({ scale: 1 });
-    const fit = container.clientWidth / base.width;
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const fit = (container.clientWidth / base.width) * scale;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3);
     const viewport = pdfPage.getViewport({ scale: fit * dpr });
     canvas.width = viewport.width;
     canvas.height = viewport.height;
-    canvas.style.width = `${container.clientWidth}px`;
+    canvas.style.width = `${viewport.width / dpr}px`;
     canvas.style.height = `${viewport.height / dpr}px`;
     const context = canvas.getContext("2d")!;
     renderTaskRef.current?.cancel();
@@ -74,10 +112,18 @@ export default function PdfCanvas({
 
   useEffect(() => {
     if (!total) return;
-    void renderPage(page);
-    onRelocated({ locator: String(page), progress: total ? page / total : 0, label: `Page ${page} of ${total}` });
+    void renderPage(page, zoom);
+    const forward = page >= lastPage.current;
+    lastPage.current = page;
+    onRelocated({
+      locator: String(page),
+      progress: total ? page / total : 0,
+      label: `Page ${page} of ${total}`,
+      href: String(page),
+      forward,
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page, total, renderPage]);
+  }, [page, total, zoom, renderPage]);
 
   useEffect(() => {
     if (!total) return;
@@ -88,47 +134,29 @@ export default function PdfCanvas({
     });
   }, [total, onReady]);
 
-  // Cursor/pinch anchored zoom on a non-passive listener.
+  // Pinch / wheel zoom — re-renders the page crisply instead of scaling pixels.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && Math.abs(event.deltaY) < 4) return;
       event.preventDefault();
-      const dy = event.deltaY * (event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 100 : 1);
-      const { zoom: z, offset: o } = stateRef.current;
-      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * Math.exp(-dy * 0.0018)));
-      const rect = el.getBoundingClientRect();
-      const px = event.clientX - rect.left;
-      const py = event.clientY - rect.top;
-      const k = next / z;
-      setOffset({ x: px - (px - o.x) * k, y: py - (py - o.y) * k });
-      setZoom(next);
+      setZoom((z) => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, z * Math.exp(-event.deltaY * 0.0015))));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
-  // Two-finger pinch + drag pan.
   const pointers = useRef(new Map<number, { x: number; y: number }>());
-  const pinchRef = useRef<{ dist: number; zoom: number; center: { x: number; y: number }; offset: { x: number; y: number } } | null>(null);
-  const dragRef = useRef<{ x: number; y: number; offset: { x: number; y: number }; moved: boolean } | null>(null);
+  const pinchRef = useRef<{ dist: number; zoom: number } | null>(null);
+  const movedRef = useRef(false);
 
   const onPointerDown = (event: React.PointerEvent) => {
-    (event.target as Element).setPointerCapture?.(event.pointerId);
     pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    movedRef.current = false;
     if (pointers.current.size === 2) {
       const [a, b] = [...pointers.current.values()];
-      if (!a || !b) return;
-      const rect = containerRef.current!.getBoundingClientRect();
-      pinchRef.current = {
-        dist: Math.hypot(a.x - b.x, a.y - b.y),
-        zoom: stateRef.current.zoom,
-        center: { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top },
-        offset: stateRef.current.offset,
-      };
-      dragRef.current = null;
-    } else if (pointers.current.size === 1) {
-      dragRef.current = { x: event.clientX, y: event.clientY, offset: stateRef.current.offset, moved: false };
+      if (a && b) pinchRef.current = { dist: Math.hypot(a.x - b.x, a.y - b.y), zoom: zoomRef.current };
     }
   };
 
@@ -139,53 +167,40 @@ export default function PdfCanvas({
       const [a, b] = [...pointers.current.values()];
       if (!a || !b) return;
       const dist = Math.hypot(a.x - b.x, a.y - b.y);
-      const start = pinchRef.current;
-      const next = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, (start.zoom * dist) / start.dist));
-      const k = next / start.zoom;
-      setOffset({
-        x: start.center.x - (start.center.x - start.offset.x) * k,
-        y: start.center.y - (start.center.y - start.offset.y) * k,
-      });
-      setZoom(next);
-    } else if (dragRef.current && stateRef.current.zoom > 1) {
-      const dx = event.clientX - dragRef.current.x;
-      const dy = event.clientY - dragRef.current.y;
-      if (Math.abs(dx) + Math.abs(dy) > 6) dragRef.current.moved = true;
-      setOffset({ x: dragRef.current.offset.x + dx, y: dragRef.current.offset.y + dy });
+      movedRef.current = true;
+      setZoom(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, (pinchRef.current.zoom * dist) / pinchRef.current.dist)));
     }
   };
 
   const onPointerUp = (event: React.PointerEvent) => {
-    const wasDrag = dragRef.current?.moved;
+    const wasPinch = pointers.current.size === 2 || movedRef.current;
     pointers.current.delete(event.pointerId);
     if (pointers.current.size < 2) pinchRef.current = null;
-    if (pointers.current.size === 0) {
-      const drag = dragRef.current;
-      dragRef.current = null;
-      if (wasDrag || !drag) return;
-      const rect = containerRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const x = event.clientX - rect.left;
-      if (x < rect.width * 0.3) setPage((p) => Math.max(1, p - 1));
-      else if (x > rect.width * 0.7) setPage((p) => Math.min(total, p + 1));
-      else onCenterTap();
-    }
+    if (pointers.current.size > 0 || wasPinch) return;
+    const rect = containerRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    const x = event.clientX - rect.left;
+    if (x < rect.width * 0.3) setPage((p) => Math.max(1, p - 1));
+    else if (x > rect.width * 0.7) setPage((p) => Math.min(total, p + 1));
+    else onCenterTap();
   };
 
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full touch-none overflow-hidden bg-background"
+      className="relative h-full w-full touch-none overflow-auto bg-background"
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
-      <div
-        className="absolute left-0 top-0 origin-top-left will-change-transform"
-        style={{ transform: `translate(${offset.x}px, ${offset.y}px) scale(${zoom})` }}
-      >
+      <div className="flex min-h-full w-full justify-center">
         <canvas ref={canvasRef} className="block" />
+      </div>
+      <div className="pointer-events-none absolute inset-x-0 top-2 flex justify-center">
+        <span className="glass rounded-full px-3 py-1 text-[10px] uppercase tracking-[0.2em] text-muted-foreground">
+          {total ? `Page ${page} of ${total}` : "Loading…"}
+        </span>
       </div>
     </div>
   );
